@@ -285,6 +285,7 @@ func (s *Server) authorize(w http.ResponseWriter, r *http.Request) {
 	}
 	cb.RawQuery = cbq.Encode()
 
+	slog.Info("Authorize granted", "sub", sub, "client_id", clientID, "code", code, "name", s.users[sub]["name"])
 	http.Redirect(w, r, cb.String(), http.StatusFound)
 }
 
