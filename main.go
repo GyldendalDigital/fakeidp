@@ -53,9 +53,10 @@ type Server struct {
 	keyRotate    time.Duration
 	keyKeep      int
 
-	latencyP95 time.Duration
-	errPct     float64 // 0..1
-	r429Pct    float64 // 0..1
+	latencyP95  time.Duration
+	errPct      float64 // 0..1
+	r429Pct     float64 // 0..1
+	debugTokens bool
 
 	keysMu sync.RWMutex
 	keys   []KeyPair // [0] is current, others are previous
@@ -435,6 +436,9 @@ func (s *Server) issueTokens(sub, scope, nonce string) (idToken, accessToken str
 	if err != nil {
 		return "", "", err
 	}
+	if s.debugTokens {
+		slog.Debug("Issued tokens", "sub", sub, "id_token", idSigned, "access_token", atSigned)
+	}
 	return idSigned, atSigned, nil
 }
 
@@ -613,6 +617,7 @@ func (s *Server) generateAdditionalUsers(lang string, n int) {
 }
 
 func main() {
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug})))
 	rnd := rand.New(rand.NewPCG(uint64(time.Now().UnixNano()), 42))
 	s := &Server{
 		issuer:       mustEnv("OIDC_ISSUER", "http://localhost:8080"),
@@ -625,6 +630,7 @@ func main() {
 		latencyP95:   parseDurationEnv("LATENCY_P95", "0s"),
 		errPct:       parseFloatEnv("ERROR_RATE", "0"),
 		r429Pct:      parseFloatEnv("R429_RATE", "0"),
+		debugTokens:  mustEnv("DEBUG_TOKENS", "false") == "true",
 		authz:        map[string]authCode{},
 		refresh:      map[string]refreshGrant{},
 		http:         http.NewServeMux(),
@@ -665,6 +671,7 @@ func main() {
 		"latency_p95", s.latencyP95.String(),
 		"error_rate", s.errPct,
 		"r429_rate", s.r429Pct,
+		"debug_tokens", s.debugTokens,
 	)
 
 	if pk := os.Getenv("PRINT_PRIVATE_KEY"); pk == "1" {
