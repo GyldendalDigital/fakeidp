@@ -217,6 +217,7 @@ func (s *Server) discovery(w http.ResponseWriter, r *http.Request) {
 		"issuer":                                base,
 		"authorization_endpoint":                base + "/authorize",
 		"token_endpoint":                        base + "/token",
+		"revocation_endpoint":                   base + "/revoke",
 		"jwks_uri":                              base + "/jwks",
 		"userinfo_endpoint":                     base + "/userinfo",
 		"token_endpoint_auth_methods_supported": []string{"client_secret_post", "none"},
@@ -285,6 +286,31 @@ func (s *Server) authorize(w http.ResponseWriter, r *http.Request) {
 	cb.RawQuery = cbq.Encode()
 
 	http.Redirect(w, r, cb.String(), http.StatusFound)
+}
+
+func (s *Server) revoke(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "bad form", http.StatusBadRequest)
+		return
+	}
+	if s.maybeDelayAndFail(w) {
+		return
+	}
+	token := r.Form.Get("token")
+	if token == "" {
+		http.Error(w, "missing token", http.StatusBadRequest)
+		return
+	}
+	if _, ok := s.refresh[token]; !ok {
+		// per RFC7009, revoking a non-existent token is still 200 OK
+		slog.Warn("Revoke called for unknown token", "token", token)
+	} else {
+		s.refreshMu.Lock()
+		slog.Info("Revoked refresh token for sub", "sub", s.refresh[token].Sub)
+		delete(s.refresh, token)
+		s.refreshMu.Unlock()
+	}
+	w.WriteHeader(http.StatusOK)
 }
 
 func (s *Server) token(w http.ResponseWriter, r *http.Request) {
@@ -623,6 +649,7 @@ func main() {
 	s.http.HandleFunc("/.well-known/openid-configuration", s.discovery)
 	s.http.HandleFunc("/authorize", s.authorize)
 	s.http.HandleFunc("/token", s.token)
+	s.http.HandleFunc("/revoke", s.revoke)
 	s.http.HandleFunc("/jwks", s.jwksHandler)
 	s.http.HandleFunc("/userinfo", s.userinfo)
 	s.http.HandleFunc("/healthz", s.health)
