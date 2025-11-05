@@ -12,7 +12,7 @@ import (
 	"io"
 	"log/slog"
 	"math"
-	"math/rand"
+	"math/rand/v2"
 	"net/http"
 	"net/url"
 	"os"
@@ -515,7 +515,7 @@ func (s *Server) pickRandomSub() string {
 	if len(s.userSubs) == 0 {
 		return "user-123" // or panic/log
 	}
-	return s.userSubs[s.rnd.Intn(len(s.userSubs))]
+	return s.userSubs[s.rnd.IntN(len(s.userSubs))]
 }
 
 func (s *Server) mergeUserClaims(dst jwt.MapClaims, sub string) {
@@ -612,7 +612,7 @@ func (s *Server) generateAdditionalUsers(lang string, n int) {
 }
 
 func main() {
-	rnd := rand.New(rand.NewSource(time.Now().UnixNano()))
+	rnd := rand.New(rand.NewPCG(uint64(time.Now().UnixNano()), 42))
 	s := &Server{
 		issuer:       mustEnv("OIDC_ISSUER", "http://localhost:8080"),
 		port:         func() int { p, _ := strconv.Atoi(mustEnv("PORT", "8080")); return p }(),
