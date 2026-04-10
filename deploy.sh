@@ -87,7 +87,8 @@ if ! az webapp show --name "$APP_NAME" --resource-group "$AZURE_RESOURCE_GROUP" 
     --name "$APP_NAME" \
     --resource-group "$AZURE_RESOURCE_GROUP" \
     --plan "$PLAN_NAME" \
-    --deployment-container-image-name "$FULL_IMAGE"
+    --deployment-container-image-name "$FULL_IMAGE" \
+    --https-only true
 fi
 
 az webapp config container set \
@@ -109,11 +110,6 @@ az webapp config appsettings set \
     OIDC_CLIENT_ID="$OIDC_CLIENT_ID" \
     OIDC_CLIENT_SECRET="$OIDC_CLIENT_SECRET" \
     WEBSITES_PORT=8080
-
-az webapp update \
-  --name "$APP_NAME" \
-  --resource-group "$AZURE_RESOURCE_GROUP" \
-  --https-only true
 
 echo ""
 echo "=== Deployment complete ==="
