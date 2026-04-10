@@ -23,6 +23,7 @@ set -euo pipefail
 : "${AZURE_RESOURCE_GROUP:?Required: AZURE_RESOURCE_GROUP}"
 : "${APP_NAME:?Required: APP_NAME}"
 : "${ACR_NAME:?Required: ACR_NAME}"
+: "${ACR_RESOURCE_GROUP:?Required: ACR_RESOURCE_GROUP}"
 
 # ── Defaults ──────────────────────────────────────────────────────────────────
 AZURE_LOCATION="${AZURE_LOCATION:-westeurope}"
@@ -39,6 +40,7 @@ echo "  Resource group: $AZURE_RESOURCE_GROUP"
 echo "  Location      : $AZURE_LOCATION"
 echo "  App name      : $APP_NAME"
 echo "  ACR           : $ACR_NAME"
+echo "  ACR rgoup     : $ACR_RESOURCE_GROUP"
 echo "  Userstate     : $USERSTATE_FILE"
 echo "  OIDC issuer   : $OIDC_ISSUER"
 echo ""
@@ -47,12 +49,12 @@ az account set --subscription "$AZURE_SUBSCRIPTION_ID"
 
 ACR_LOGIN_SERVER=$(az acr show \
   --name "$ACR_NAME" \
-  --resource-group "$AZURE_RESOURCE_GROUP" \
+  --resource-group "$ACR_RESOURCE_GROUP" \
   --query loginServer -o tsv)
 
 ACR_PASSWORD=$(az acr credential show \
   --name "$ACR_NAME" \
-  --resource-group "$AZURE_RESOURCE_GROUP" \
+  --resource-group "$ACR_RESOURCE_GROUP" \
   --query "passwords[0].value" -o tsv)
 
 FULL_IMAGE="${ACR_LOGIN_SERVER}/fakeidp:${IMAGE_TAG}"
@@ -61,7 +63,7 @@ FULL_IMAGE="${ACR_LOGIN_SERVER}/fakeidp:${IMAGE_TAG}"
 echo ">>> Building and pushing $FULL_IMAGE"
 az acr build \
   --registry "$ACR_NAME" \
-  --resource-group "$AZURE_RESOURCE_GROUP" \
+  --resource-group "$ACR_RESOURCE_GROUP" \
   --image "fakeidp:${IMAGE_TAG}" \
   --build-arg "USERSTATE_FILE=${USERSTATE_FILE}" \
   --file Dockerfile \
