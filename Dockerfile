@@ -7,6 +7,8 @@ RUN CGO_ENABLED=0 go build -trimpath -o /fakeidp .
 
 FROM alpine:3
 RUN adduser -D -u 1000 app
+ARG USERSTATE_FILE=tmp/users.json
+COPY --chown=app:app ${USERSTATE_FILE} /data/users.json
 USER app
 COPY --from=builder /fakeidp /fakeidp
 EXPOSE 8080
