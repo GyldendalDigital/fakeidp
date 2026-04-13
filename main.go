@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"flag"
 	"fmt"
 	"io"
 	"log/slog"
@@ -16,6 +17,8 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -89,6 +92,30 @@ type refreshGrant struct {
 	Sub       string
 	ExpiresAt time.Time
 	Scope     string
+}
+
+type userStateFile struct {
+	Users map[string]map[string]any `json:"users"`
+}
+
+type startupConfig struct {
+	UserStatePath string
+	UserCount     int
+}
+
+var defaultUserLanguages = []string{
+	"finnish",
+	"swedish",
+	"norwegian",
+	"sindarin",
+	"italian",
+	"french",
+	"german",
+	"japanese_romaji",
+	"spanish",
+	"portuguese",
+	"icelandic",
+	"kobaian",
 }
 
 func mustEnv(key, def string) string {
@@ -513,6 +540,7 @@ func (s *Server) initUserIndex() {
 	for sub := range s.users {
 		s.userSubs = append(s.userSubs, sub)
 	}
+	sort.Strings(s.userSubs)
 	slog.Info("Initialized user index", "count", len(s.userSubs))
 }
 
@@ -534,9 +562,9 @@ func (s *Server) mergeUserClaims(dst jwt.MapClaims, sub string) {
 	}
 }
 
-func (s *Server) generateAdditionalUsers(lang string, n int) {
+func (s *Server) generateAdditionalUsers(lang string, n int) (int, error) {
 	if n <= 0 {
-		return
+		return 0, nil
 	}
 
 	type persona struct {
@@ -557,28 +585,24 @@ func (s *Server) generateAdditionalUsers(lang string, n int) {
 	client := &http.Client{Timeout: 10 * time.Second}
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
-		slog.Error("generateAdditionalUsers: new request", "error", err)
-		return
+		return 0, fmt.Errorf("create request for %s users: %w", lang, err)
 	}
 	req.Header.Set("Accept", "application/json")
 
 	resp, err := client.Do(req)
 	if err != nil {
-		slog.Error("generateAdditionalUsers: http error", "error", err)
-		return
+		return 0, fmt.Errorf("fetch %s users: %w", lang, err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		slog.Error("generateAdditionalUsers: non-200 response", "status_code", resp.StatusCode, "body", string(body))
-		return
+		return 0, fmt.Errorf("fetch %s users: status=%d body=%q", lang, resp.StatusCode, string(body))
 	}
 
 	var parsed apiResp
 	if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
-		slog.Error("generateAdditionalUsers: decode error", "error", err)
-		return
+		return 0, fmt.Errorf("decode %s users: %w", lang, err)
 	}
 
 	if s.users == nil {
@@ -614,10 +638,142 @@ func (s *Server) generateAdditionalUsers(lang string, n int) {
 	}
 
 	slog.Info("Generated additional users", "language", lang, "added", added)
+	return added, nil
+}
+
+func distributeCount(total, buckets int) []int {
+	counts := make([]int, buckets)
+	if total <= 0 || buckets <= 0 {
+		return counts
+	}
+
+	base := total / buckets
+	remainder := total % buckets
+	for i := range counts {
+		counts[i] = base
+		if i < remainder {
+			counts[i]++
+		}
+	}
+	return counts
+}
+
+func (s *Server) generateUsers(total int) error {
+	if total < 0 {
+		return fmt.Errorf("user count must be >= 0")
+	}
+	counts := distributeCount(total, len(defaultUserLanguages))
+	generated := 0
+	for i, lang := range defaultUserLanguages {
+		added, err := s.generateAdditionalUsers(lang, counts[i])
+		if err != nil {
+			return err
+		}
+		generated += added
+	}
+	if generated != total {
+		return fmt.Errorf("generated %d users, expected %d", generated, total)
+	}
+	return nil
+}
+
+func loadUserState(path string) (map[string]map[string]any, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+
+	var state userStateFile
+	if err := json.Unmarshal(data, &state); err != nil {
+		return nil, fmt.Errorf("decode user state: %w", err)
+	}
+	if state.Users == nil {
+		return nil, fmt.Errorf("decode user state: missing users")
+	}
+	for sub, claims := range state.Users {
+		if claims == nil {
+			return nil, fmt.Errorf("decode user state: user %q has empty claims", sub)
+		}
+		if claimSub, ok := claims["sub"].(string); !ok || claimSub == "" {
+			claims["sub"] = sub
+		}
+	}
+	return state.Users, nil
+}
+
+func saveUserState(path string, users map[string]map[string]any) error {
+	state := userStateFile{Users: users}
+	data, err := json.MarshalIndent(state, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode user state: %w", err)
+	}
+	data = append(data, '\n')
+
+	dir := filepath.Dir(path)
+	if dir != "." {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return fmt.Errorf("create user state directory: %w", err)
+		}
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		return fmt.Errorf("write user state: %w", err)
+	}
+	return nil
+}
+
+func fileExists(path string) (bool, error) {
+	_, err := os.Stat(path)
+	if err == nil {
+		return true, nil
+	}
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	return false, err
+}
+
+func parseStartupConfig() startupConfig {
+	cfg := startupConfig{}
+	flag.StringVar(&cfg.UserStatePath, "userstate", "", "path to a JSON file for loading/saving generated users")
+	flag.IntVar(&cfg.UserCount, "users", len(defaultUserLanguages)*50, "total number of users to generate when no userstate file is loaded")
+	flag.Parse()
+	return cfg
+}
+
+func loadOrGenerateUsers(s *Server, cfg startupConfig) error {
+	if cfg.UserStatePath != "" {
+		exists, err := fileExists(cfg.UserStatePath)
+		if err != nil {
+			return fmt.Errorf("stat userstate file: %w", err)
+		}
+		if exists {
+			users, err := loadUserState(cfg.UserStatePath)
+			if err != nil {
+				return err
+			}
+			s.users = users
+			slog.Info("Loaded users from userstate file", "path", cfg.UserStatePath, "count", len(s.users))
+			return nil
+		}
+	}
+
+	if err := s.generateUsers(cfg.UserCount); err != nil {
+		return err
+	}
+	slog.Info("Generated users", "count", len(s.users))
+
+	if cfg.UserStatePath != "" {
+		if err := saveUserState(cfg.UserStatePath, s.users); err != nil {
+			return err
+		}
+		slog.Info("Saved generated users to userstate file", "path", cfg.UserStatePath, "count", len(s.users))
+	}
+	return nil
 }
 
 func main() {
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	startupCfg := parseStartupConfig()
 	rnd := rand.New(rand.NewPCG(uint64(time.Now().UnixNano()), 42))
 	s := &Server{
 		issuer:       mustEnv("OIDC_ISSUER", "http://localhost:8080"),
@@ -637,18 +793,10 @@ func main() {
 		rnd:          rnd,
 		users:        make(map[string]map[string]any),
 	}
-	s.generateAdditionalUsers("finnish", 50)
-	s.generateAdditionalUsers("swedish", 50)
-	s.generateAdditionalUsers("norwegian", 50)
-	s.generateAdditionalUsers("sindarin", 50)
-	s.generateAdditionalUsers("italian", 50)
-	s.generateAdditionalUsers("french", 50)
-	s.generateAdditionalUsers("german", 50)
-	s.generateAdditionalUsers("japanese_romaji", 50)
-	s.generateAdditionalUsers("spanish", 50)
-	s.generateAdditionalUsers("portuguese", 50)
-	s.generateAdditionalUsers("icelandic", 50)
-	s.generateAdditionalUsers("kobaian", 50)
+	if err := loadOrGenerateUsers(s, startupCfg); err != nil {
+		slog.Error("Failed to initialize users", "error", err)
+		os.Exit(1)
+	}
 	s.initUserIndex()
 	// initial keys
 	s.keys = []KeyPair{newKeyPair()}
@@ -672,6 +820,8 @@ func main() {
 		"error_rate", s.errPct,
 		"r429_rate", s.r429Pct,
 		"debug_tokens", s.debugTokens,
+		"userstate", startupCfg.UserStatePath,
+		"user_count", len(s.users),
 	)
 
 	if pk := os.Getenv("PRINT_PRIVATE_KEY"); pk == "1" {

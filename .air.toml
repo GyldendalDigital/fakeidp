@@ -5,6 +5,7 @@ tmp_dir = "tmp"
 
 [build]
   bin = "./tmp/fakeidp"
+  full_bin = "./tmp/fakeidp --userstate tmp/users.json --users 1000"
   cmd = """
   go build -o ./tmp/fakeidp .
   """
