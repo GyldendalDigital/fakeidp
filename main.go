@@ -781,7 +781,7 @@ func main() {
 		clientID:     mustEnv("OIDC_CLIENT_ID", "demo-client"),
 		clientSecret: mustEnv("OIDC_CLIENT_SECRET", ""),
 		alg:          "RS256",
-		keyRotate:    parseDurationEnv("KEY_ROTATE_EVERY", "15m"),
+		keyRotate:    parseDurationEnv("KEY_ROTATE_EVERY", "24h"),
 		keyKeep:      func() int { v, _ := strconv.Atoi(mustEnv("KEY_KEEP", "3")); return v }(),
 		latencyP95:   parseDurationEnv("LATENCY_P95", "0s"),
 		errPct:       parseFloatEnv("ERROR_RATE", "0"),
