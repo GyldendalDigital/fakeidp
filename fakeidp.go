@@ -67,9 +67,10 @@ type Server struct {
 	refresh     map[string]refreshGrant
 	revokeCalls int
 
-	usersMu  sync.RWMutex
-	users    map[string]map[string]any // sub -> claims
-	userSubs []string
+	usersMu      sync.RWMutex
+	users        map[string]map[string]any // sub -> claims
+	userSubs     []string
+	defaultLogin string
 
 	rndMu sync.Mutex
 	rnd   *rand.Rand
@@ -226,6 +227,15 @@ func (s *Server) AddUser(sub string, claims map[string]any) {
 	s.usersMu.Unlock()
 }
 
+// SetDefaultLogin pins which user /authorize selects when the request has
+// no login parameter. Useful when the relying party under test cannot be
+// told to forward a login hint. An empty sub restores the random pick.
+func (s *Server) SetDefaultLogin(sub string) {
+	s.usersMu.Lock()
+	s.defaultLogin = sub
+	s.usersMu.Unlock()
+}
+
 // User returns a copy of the claims for sub, or nil if unknown.
 func (s *Server) User(sub string) map[string]any {
 	s.usersMu.RLock()
@@ -297,6 +307,9 @@ func (s *Server) rebuildUserIndexLocked() {
 func (s *Server) pickRandomSub() string {
 	s.usersMu.RLock()
 	defer s.usersMu.RUnlock()
+	if s.defaultLogin != "" {
+		return s.defaultLogin
+	}
 	if len(s.userSubs) == 0 {
 		return ""
 	}

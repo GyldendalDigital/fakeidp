@@ -450,3 +450,26 @@ func TestCloseIsIdempotent(t *testing.T) {
 		t.Fatalf("second Close: %v", err)
 	}
 }
+
+func TestSetDefaultLogin(t *testing.T) {
+	t.Parallel()
+	s, ts := NewTestServer(t, testOpts())
+	s.SetDefaultLogin("user-carol")
+
+	authURL := fmt.Sprintf(
+		"%s/authorize?client_id=test-client&redirect_uri=%s&state=stateisatleast16chars",
+		ts.URL, url.QueryEscape("https://rp.example.test/callback"),
+	)
+	resp, err := noRedirect().Get(authURL)
+	if err != nil {
+		t.Fatalf("GET /authorize: %v", err)
+	}
+	defer resp.Body.Close()
+	loc, _ := url.Parse(resp.Header.Get("Location"))
+	code := loc.Query().Get("code")
+	tr := exchangeCode(t, ts, code)
+	claims := verifyAgainstJWKS(t, ts, tr.IDToken)
+	if claims["sub"] != "user-carol" {
+		t.Fatalf("sub=%v want user-carol", claims["sub"])
+	}
+}
