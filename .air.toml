@@ -7,7 +7,7 @@ tmp_dir = "tmp"
   bin = "./tmp/fakeidp"
   full_bin = "./tmp/fakeidp --userstate tmp/users.json --users 1000"
   cmd = """
-  go build -o ./tmp/fakeidp .
+  go build -o ./tmp/fakeidp ./cmd/fakeidp
   """
   delay = 100
   include_ext = ["go"]
