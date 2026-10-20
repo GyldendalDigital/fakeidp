@@ -3,7 +3,7 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 go build -trimpath -o /fakeidp .
+RUN CGO_ENABLED=0 go build -trimpath -o /fakeidp ./cmd/fakeidp
 
 FROM alpine:3
 RUN adduser -D -u 1000 app
