@@ -1,4 +1,4 @@
-FROM golang:1.25-alpine AS builder
+FROM golang:1.27-alpine AS builder
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
@@ -6,6 +6,7 @@ COPY . .
 RUN CGO_ENABLED=0 go build -trimpath -o /fakeidp ./cmd/fakeidp
 
 FROM alpine:3
+RUN apk upgrade --no-cache
 RUN adduser -D -u 1000 app
 ARG USERSTATE_FILE=tmp/users.json
 COPY --chown=app:app ${USERSTATE_FILE} /data/users.json
